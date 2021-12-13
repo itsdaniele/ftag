@@ -1,0 +1,17 @@
+name: ftag
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.8
+  - ipython
+  - numpy
+  - pytorch>=1.8
+  - pip
+  - pip:
+    - -r tests/requirements.txt
+    - pytorch-lightning>=1.2.0
+    - hydra-core --pre  # Using 1.1 pre-release for the moment
+    - hydra-colorlog --pre
+    - pudb
+    - h5py
