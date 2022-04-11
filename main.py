@@ -4,41 +4,47 @@ import hydra
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
 
+from pytorch_lightning import (
+    Callback,
+    LightningDataModule,
+    LightningModule,
+    Trainer,
+)
+
+from ftag.model.classifier import ClassifierHugging, ClassifierCustom
+
 logger = logging.getLogger(__name__)
+
+from pytorch_lightning.loggers import WandbLogger
+
+wandb_logger = WandbLogger(project="ftag")
+
 
 @hydra.main(config_path="configs", config_name="defaults")
 def main(cfg: DictConfig) -> None:
     pl.seed_everything(1234)
     logger.info("\n" + OmegaConf.to_yaml(cfg))
 
-    # Instantiate all modules specified in the configs
-    model = hydra.utils.instantiate(
-        cfg.model,  # Object to instantiate
-        # Overwrite arguments at runtime that depends on other modules
-        input_dim=cfg.data.input_dim,
-        output_dim=cfg.data.output_dim,
-        # Don't instantiate optimizer submodules with hydra, let `configure_optimizers()` do it
-        _recursive_=False,
-    )
-
     data_module = hydra.utils.instantiate(cfg.data)
 
+    # Instantiate all modules specified in the configs
+    model = ClassifierCustom()
+
     # Let hydra manage direcotry outputs
-    tensorboard = pl.loggers.TensorBoardLogger(".", "", "", log_graph=True, default_hp_metric=False)
+    # tensorboard = pl.loggers.TensorBoardLogger(save_dir=".", default_hp_metric=False)
     callbacks = [
-        pl.callbacks.ModelCheckpoint(monitor='loss/val'),
-        pl.callbacks.EarlyStopping(monitor='loss/val', patience=50),
+        pl.callbacks.ModelCheckpoint(every_n_train_steps=10),
+        # pl.callbacks.EarlyStopping(monitor="val/acc", patience=50),
     ]
 
-    trainer = pl.Trainer(
-        **OmegaConf.to_container(cfg.trainer),
-        logger=tensorboard,
-        callbacks=callbacks,
+    logger.info(f"Instantiating trainer <{cfg.trainer._target_}>")
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=wandb_logger, _convert_="partial"
     )
 
     trainer.fit(model, datamodule=data_module)
-    trainer.test(model, datamodule=data_module)  # Optional
+    #trainer.test(model, datamodule=data_module)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

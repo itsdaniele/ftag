@@ -3,60 +3,167 @@ import pytorch_lightning as pl
 import torch
 from torch.nn import functional as F
 
+from transformers import BertForSequenceClassification, BertConfig
+from .bert.bert import BERT
 
-class LitClassifier(pl.LightningModule):
-    def __init__(self, optim, input_dim, output_dim, hidden_dim=128, **kwargs):
-        super().__init__()
-        self.save_hyperparameters()
+from torchmetrics.classification.accuracy import Accuracy
+from torchmetrics import MaxMetric
 
-        self.l1 = torch.nn.Linear(input_dim, hidden_dim)
-        self.l2 = torch.nn.Linear(hidden_dim, output_dim)
+import torch.nn as nn
+import torch.nn.functional as F
 
-        self.val_accuracy = pl.metrics.Accuracy()
-        self.test_accuracy = pl.metrics.Accuracy()
 
-        self.example_input_array = torch.randn([input_dim, input_dim])
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        x = torch.relu(self.l1(x))
-        x = torch.relu(self.l2(x))
-        return x
+class Classifier(pl.LightningModule):
+    def step(self, batch):
+        raise NotImplementedError()
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log("loss/train", loss)
-        return loss
+        loss, preds, targets = self.step(batch)
 
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('loss/val', loss)
-        accuracy = self.val_accuracy(torch.softmax(y_hat, dim=1), y)
-        self.log('accuracy/val', accuracy)
+        _ = self.train_acc(preds, targets)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(
+            "train/acc",
+            self.train_acc.compute(),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        # we can return here dict with any tensors
+        # and then read it in some callback or in `training_epoch_end()`` below
+        # remember to always return loss from `training_step()` or else backpropagation will fail!
+        return {"loss": loss, "preds": preds, "targets": targets}
+
+    def validation_step(self, batch, batch_idx: int):
+        loss, preds, targets = self.step(batch)
+
+        # log val metrics
+        _ = self.val_acc(preds, targets)
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "val/acc",
+            self.val_acc.compute(),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return {"loss": loss, "preds": preds, "targets": targets}
+
+    def test_step(self, batch, batch_idx: int):
+        _, preds, targets = self.step(batch)
+
+        # log val metrics
+        _ = self.test_acc(preds, targets)
+        self.log(
+            "test/acc",
+            self.test_acc.compute(),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return {"preds": preds, "targets": targets}
 
     def validation_epoch_end(self, outputs):
-        self.log("accuracy/val", self.val_accuracy.compute())
+        acc = self.val_acc.compute()  # get val accuracy from current epoch
+        self.val_acc_best.update(acc)
+        self.log(
+            "val/acc_best", self.val_acc_best.compute(), on_epoch=True, prog_bar=True
+        )
 
-    def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('loss/test', loss)
-        test_accuracy = self.test_accuracy(torch.softmax(y_hat, dim=1), y)
-        return test_accuracy
-
-    def test_epoch_end(self, outputs):
-        self.log('accuracy/test', self.test_accuracy.compute())
-
+    def on_epoch_end(self):
+        # reset metrics at the end of every epoch!
+        self.train_acc.reset()
+        self.val_acc.reset()
+        self.test_acc.reset()
 
     def configure_optimizers(self):
-        return hydra.utils.instantiate(self.hparams.optim, params=self.parameters())
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+        See examples here:
+            https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
+        """
+        return torch.optim.Adam(params=self.parameters(), lr=0.001)
 
-    def on_train_start(self):
-        # Proper logging of hyperparams and metrics in TB
-        self.logger.log_hyperparams(self.hparams, {"loss/val": 0, "accuracy/val": 0, "accuracy/test": 0})
 
+class ClassifierHugging(Classifier):
+    def __init__(self):
+        super().__init__()
+
+        configuration = BertConfig()
+        configuration.hidden_size = 8
+        configuration.num_hidden_layers = 3
+        configuration.num_attention_heads = 4
+        configuration.intermediate_size = 8
+        configuration.position_embedding_type = "relative_key"
+
+        configuration.num_labels = 3
+        self.bert = BertForSequenceClassification(configuration)
+
+        # 21 = track variables, 2=jet pt and eta
+        # TODO do better
+        self.embed = torch.nn.Linear(21 + 0, configuration.hidden_size)
+
+        self.train_acc = Accuracy()
+        self.val_acc = Accuracy()
+        self.test_acc = Accuracy()
+
+        self.val_acc_best = MaxMetric()
+
+        # self.save_hyperparameters()
+
+    def step(self, batch):
+        x, y = batch
+
+        y = torch.argmax(batch[1], dim=-1)
+        out = self.forward(batch)
+        preds = torch.argmax(out.logits, dim=1)
+        return out.loss, preds, y
+
+    def forward(self, batch):
+
+        embeds = self.embed(batch[0])
+
+        labels = torch.argmax(batch[1], dim=-1)
+        out = self.bert(inputs_embeds=embeds, labels=labels)
+
+        return out
+
+
+class ClassifierCustom(Classifier):
+    def __init__(self):
+        super().__init__()
+
+        self.bert = BERT(hidden=8, n_layers=3, attn_heads=4, dropout=0.1)
+        self.to_logits = nn.Linear(8, 3)
+
+        # 21 = track variables, 2=jet pt and eta
+        # TODO do better
+        self.embed = torch.nn.Linear(21 + 2, 8)
+
+        self.train_acc = Accuracy()
+        self.val_acc = Accuracy()
+        self.test_acc = Accuracy()
+
+        self.val_acc_best = MaxMetric()
+
+        # self.save_hyperparameters()
+
+    def step(self, batch):
+        x, y = batch
+
+        y = torch.argmax(batch[1], dim=-1)
+        out = self.forward(batch)
+        preds = torch.argmax(out, dim=1)
+        loss = F.cross_entropy(out, y)
+        return loss, preds, y
+
+    def forward(self, batch):
+
+        embeds = self.embed(batch[0])
+
+        # labels = torch.argmax(batch[1], dim=-1)
+        out = self.bert(embeds)
+        return self.to_logits(out)

@@ -1,150 +1,180 @@
+from re import S
 import h5py
-import numpy as np
-from pathlib import Path
+import json
+
 import torch
 from torch.utils import data
 
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder
+
 
 class HDF5Dataset(data.Dataset):
-    """Represents an abstract HDF5 dataset.
-    
-    Input params:
-        file_path: Path to the folder containing the dataset (one or multiple HDF5 files).
-        recursive: If True, searches for h5 files in subdirectories.
-        load_data: If True, loads all the data immediately into RAM. Use this if
-            the dataset is fits into memory. Otherwise, leave this at false and 
-            the data will load lazily.
-        data_cache_size: Number of HDF5 files that can be cached in the cache (default=3).
-        transform: PyTorch transform to apply to every data instance (default=None).
-    """
-
-    def __init__(
-        self, file_path, recursive, load_data, data_cache_size=3, transform=None
-    ):
+    def __init__(self, file_path, batch_size=32, num_samples=int(1e6)):
         super().__init__()
-        self.data_info = []
-        self.data_cache = {}
-        self.data_cache_size = data_cache_size
-        self.transform = transform
+        hf = h5py.File(file_path, "r")
 
-        # Search for all h5 files
-        p = Path(file_path)
-        assert p.is_dir()
-        if recursive:
-            files = sorted(p.glob("**/*.h5"))
-        else:
-            files = sorted(p.glob("*.h5"))
-        if len(files) < 1:
-            raise RuntimeError("No hdf5 datasets found")
+        # group_key_x = list(hf.keys())[0]
+        # group_key_y = list(hf.keys())[1]
 
-        for h5dataset_fp in files:
-            self._add_data_infos(str(h5dataset_fp.resolve()), load_data)
+        group_key_x = "X_tracks_loose_train"
+        group_key_y = "Y_train"
+        group_key_global = "X_train"
+
+        self.ds_x = hf[group_key_x][:num_samples]
+        self.ds_global = hf[group_key_global][:num_samples, :2][:, None, :]
+        self.ds_global = np.repeat(self.ds_global, repeats=self.ds_x.shape[1], axis=1)
+        self.ds_x = np.concatenate((self.ds_x, self.ds_global), axis=-1)
+
+        self.ds_y = hf[group_key_y][:num_samples]
+
+        self.batch_size = batch_size
 
     def __getitem__(self, index):
-        # get data
-        x = self.get_data("data", index)
-        if self.transform:
-            x = self.transform(x)
-        else:
-            x = torch.from_numpy(x)
 
-        # get label
-        y = self.get_data("label", index)
-        y = torch.from_numpy(y)
-        return (x, y)
+        return (
+            torch.from_numpy(
+                self.ds_x[
+                    index * self.batch_size : (index * self.batch_size)
+                    + self.batch_size
+                ]
+            ).float(),
+            torch.from_numpy(
+                self.ds_y[
+                    index * self.batch_size : (index * self.batch_size)
+                    + self.batch_size
+                ]
+            ),
+        )
 
     def __len__(self):
-        return len(self.get_data_infos("data"))
+        # return self.ds_x.__len__() // self.batch_size
+        return 5000
 
-    def _add_data_infos(self, file_path, load_data):
-        with h5py.File(file_path) as h5_file:
-            # Walk through all groups, extracting datasets
-            for gname, group in h5_file.items():
-                for dname, ds in group.items():
-                    # if data is not loaded its cache index is -1
-                    idx = -1
-                    if load_data:
-                        # add data to the data cache
-                        idx = self._add_to_cache(ds.value, file_path)
 
-                    # type is derived from the name of the dataset; we expect the dataset
-                    # name to have a name such as 'data' or 'label' to identify its type
-                    # we also store the shape of the data in case we need it
-                    self.data_info.append(
-                        {
-                            "file_path": file_path,
-                            "type": dname,
-                            "shape": ds.value.shape,
-                            "cache_idx": idx,
-                        }
-                    )
+def get_track_mask(tracks: np.ndarray) -> np.ndarray:
+    """_summary_
 
-    def _load_data(self, file_path):
-        """Load data to the cache given the file
-        path and update the cache index in the
-        data_info structure.
-        """
-        with h5py.File(file_path) as h5_file:
-            for gname, group in h5_file.items():
-                for dname, ds in group.items():
-                    # add data to the data cache and retrieve
-                    # the cache index
-                    idx = self._add_to_cache(ds.value, file_path)
+    Parameters
+    ----------
+    tracks : np.ndarray
+        Loaded tracks with shape (nJets, nTrks, nTrkFeatures). Note, the
+        input tracks should not already be converted with np.nan_to_num, as this
+        function relies on a np.isnan check in the case where the valid flag is
+        not present.
 
-                    # find the beginning index of the hdf5 file we are looking for
-                    file_idx = next(
-                        i
-                        for i, v in enumerate(self.data_info)
-                        if v["file_path"] == file_path
-                    )
+    Returns
+    -------
+    np.ndarray
+        A bool array (nJets, nTrks), True for tracks that are present.
 
-                    # the data info should have the same index since we loaded it in the same way
-                    self.data_info[file_idx + idx]["cache_idx"] = idx
+    Raises
+    ------
+    ValueError
+        If no 'valid' flag or at least one float variable in your input tracks.
+    """
 
-        # remove an element from data cache if size was exceeded
-        if len(self.data_cache) > self.data_cache_size:
-            # remove one item from the cache at random
-            removal_keys = list(self.data_cache)
-            removal_keys.remove(file_path)
-            self.data_cache.pop(removal_keys[0])
-            # remove invalid cache_idx
-            self.data_info = [
-                {
-                    "file_path": di["file_path"],
-                    "type": di["type"],
-                    "shape": di["shape"],
-                    "cache_idx": -1,
-                }
-                if di["file_path"] == removal_keys[0]
-                else di
-                for di in self.data_info
-            ]
+    # try to use the valid flag, present in newer samples
+    if "valid" in tracks.dtype.names:
+        return tracks["valid"]
 
-    def _add_to_cache(self, data, file_path):
-        """Adds data to the cache and returns its index. There is one cache
-        list for every file_path, containing all datasets in that file.
-        """
-        if file_path not in self.data_cache:
-            self.data_cache[file_path] = [data]
-        else:
-            self.data_cache[file_path].append(data)
-        return len(self.data_cache[file_path]) - 1
+    # instead look for a float variable to use, which will be NaN
+    # for the padded tracks
+    for var, dtype in tracks.dtype.fields.items():
+        if "f" in dtype[0].str:
+            return ~np.isnan(tracks[var])
 
-    def get_data_infos(self, type):
-        """Get data infos belonging to a certain type of data.
-        """
-        data_info_type = [di for di in self.data_info if di["type"] == type]
-        return data_info_type
+    raise ValueError(
+        "Need 'valid' flag or at least one float variable in your input tracks."
+    )
 
-    def get_data(self, type, i):
-        """Call this function anytime you want to access a chunk of data from the
-            dataset. This will make sure that the data is loaded in case it is
-            not part of the data cache.
-        """
-        fp = self.get_data_infos(type)[i]["file_path"]
-        if fp not in self.data_cache:
-            self._load_data(fp)
 
-        # get new cache_idx assigned by _load_data_info
-        cache_idx = self.get_data_infos(type)[i]["cache_idx"]
-        return self.data_cache[fp][cache_idx]
+class HDF5DatasetTest(data.Dataset):
+    def __init__(self, file_path, scale_dict_path, batch_size=32):
+        super().__init__()
+
+        classes_to_remove = [15]
+
+        with open(scale_dict_path) as json_file:
+            scale_dict = json.load(json_file)["tracks_loose"]
+
+        # variables = list(scale_dict.keys())
+        variables = [
+            "d0",
+            "z0SinTheta",
+            "dphi",
+            "deta",
+            "qOverP",
+            "IP3D_signed_d0_significance",
+            "IP3D_signed_z0_significance",
+            "phiUncertainty",
+            "thetaUncertainty",
+            "qOverPUncertainty",
+            "numberOfPixelHits",
+            "numberOfSCTHits",
+            "numberOfInnermostPixelLayerHits",
+            "numberOfNextToInnermostPixelLayerHits",
+            "numberOfInnermostPixelLayerSharedHits",
+            "numberOfInnermostPixelLayerSplitHits",
+            "numberOfPixelSharedHits",
+            "numberOfPixelSplitHits",
+            "numberOfSCTSharedHits",
+            "numberOfPixelHoles",
+            "numberOfSCTHoles",
+        ]
+
+        hf = h5py.File(file_path, "r")
+        tracks = hf["tracks_loose"][: int(1e6)]
+
+        track_mask = get_track_mask(tracks)
+
+        var_arr_list = []
+        for var in variables:
+            x = tracks[var]
+            shift = np.float32(scale_dict[var]["shift"])
+            scale = np.float32(scale_dict[var]["scale"])
+            x = np.where(track_mask, x - shift, 0)
+            x = np.where(track_mask, x / scale, 0)
+
+            var_arr_list.append(x)
+
+        x = np.stack(var_arr_list, axis=-1)
+        y = hf["jets"]["HadronConeExclTruthLabelID"][: int(1e6)]
+
+        indices_toremove = []
+        for class_id in classes_to_remove:
+            indices_toremove.append(np.where(y == class_id)[0])
+
+        for elem in indices_toremove:
+            self.x = np.delete(x, elem, axis=0)
+            y = np.delete(y, elem, axis=0)
+
+        y = np.where(y == 4, 1, y)
+        y = np.where(y == 5, 2, y)
+
+        enc = OneHotEncoder()
+        self.y = enc.fit_transform(y[:, None]).todense()
+        self.batch_size = batch_size
+
+    def __getitem__(self, index):
+
+        return (
+            torch.from_numpy(
+                np.array(
+                    self.x[
+                        index * self.batch_size : (index * self.batch_size)
+                        + self.batch_size
+                    ]
+                )
+            ).float(),
+            torch.from_numpy(
+                self.y[
+                    index * self.batch_size : (index * self.batch_size)
+                    + self.batch_size
+                ]
+            ),
+        )
+
+    def __len__(self):
+        # return self.ds_x.__len__() // self.batch_size
+        return self.x.__len__() // self.batch_size

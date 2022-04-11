@@ -2,6 +2,7 @@ import logging
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
+from .h5dataset import HDF5Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -18,31 +19,23 @@ class TRACKSDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == "fit" or stage is None:
-            cifar_full = CIFAR10(
-                self.data_dir, train=True, download=True, transform=ToTensor()
-            )
-            split_size = [int(0.8 * len(cifar_full)), int(0.2 * len(cifar_full))]
-            self.mnist_train, self.mnist_val = random_split(cifar_full, split_size)
-            self.dims = tuple(self.mnist_train[0][0].shape)
+            tracks_full = HDF5Dataset(self.data_dir, batch_size=self.batch_size)
+            split_size = [int(0.8 * len(tracks_full)), int(0.2 * len(tracks_full))]
+            self.tracks_train, self.tracks_val = random_split(tracks_full, split_size)
+            self.dims = tuple(self.tracks_train[0][0].shape)
         elif stage == "test" or stage is None:
-            self.mnist_test = CIFAR10(
-                self.data_dir, train=False, download=True, transform=ToTensor()
-            )
+            pass
 
     def train_dataloader(self):
         return DataLoader(
-            self.mnist_train, batch_size=self.batch_size, num_workers=self.num_workers
+            self.tracks_train, batch_size=None, num_workers=self.num_workers
         )
 
     # Double workers for val and test loaders since there is no backward pass and GPU computation is faster
     def val_dataloader(self):
         return DataLoader(
-            self.mnist_val, batch_size=self.batch_size, num_workers=self.num_workers * 2
+            self.tracks_val, batch_size=None, num_workers=self.num_workers * 2,
         )
 
     def test_dataloader(self):
-        return DataLoader(
-            self.mnist_test,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers * 2,
-        )
+        return self.val_dataloader()
