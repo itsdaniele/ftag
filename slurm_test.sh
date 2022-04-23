@@ -5,7 +5,7 @@
 #SBATCH --partition=shared-gpu
 #SBATCH --output=slurm.out
 #SBATCH --error=slurm.err
-#SBATCH --time=12:00:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:ampere:1
 #SBATCH --cpus-per-task 32
 #SBATCH --nodes=1
@@ -23,4 +23,4 @@ echo "I: CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES}"
 echo "====="
 
 source activate gecko
-srun python main.py
+srun python test.py

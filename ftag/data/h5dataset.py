@@ -10,12 +10,9 @@ from sklearn.preprocessing import OneHotEncoder
 
 
 class HDF5Dataset(data.Dataset):
-    def __init__(self, file_path, batch_size=32, num_samples=int(1e6)):
+    def __init__(self, file_path, batch_size=32, num_samples=int(2e6)):
         super().__init__()
         hf = h5py.File(file_path, "r")
-
-        # group_key_x = list(hf.keys())[0]
-        # group_key_y = list(hf.keys())[1]
 
         group_key_x = "X_tracks_loose_train"
         group_key_y = "Y_train"
@@ -49,7 +46,7 @@ class HDF5Dataset(data.Dataset):
 
     def __len__(self):
         # return self.ds_x.__len__() // self.batch_size
-        return 5000
+        return 30000
 
 
 def get_track_mask(tracks: np.ndarray) -> np.ndarray:
@@ -90,13 +87,24 @@ def get_track_mask(tracks: np.ndarray) -> np.ndarray:
 
 
 class HDF5DatasetTest(data.Dataset):
-    def __init__(self, file_path, scale_dict_path, batch_size=32):
+    def __init__(self, file_path, scale_dict_path, batch_size=32, num_samples=int(1e3)):
         super().__init__()
 
         classes_to_remove = [15]
 
         with open(scale_dict_path) as json_file:
             scale_dict = json.load(json_file)["tracks_loose"]
+
+        with open(scale_dict_path) as json_file:
+            scale_dict_jets_tmp = json.load(json_file)["jets"]
+
+        scale_dict_jets = {}
+
+        for elem in scale_dict_jets_tmp:
+            scale_dict_jets[elem["name"]] = {
+                "shift": elem["shift"],
+                "scale": elem["scale"],
+            }
 
         # variables = list(scale_dict.keys())
         variables = [
@@ -123,8 +131,12 @@ class HDF5DatasetTest(data.Dataset):
             "numberOfSCTHoles",
         ]
 
+        jets_variables = ["eta_btagJes", "pt_btagJes"]
+
         hf = h5py.File(file_path, "r")
-        tracks = hf["tracks_loose"][: int(1e6)]
+
+        tracks = hf["tracks_loose"][:num_samples]
+        jets = hf["jets"][:num_samples]
 
         track_mask = get_track_mask(tracks)
 
@@ -138,8 +150,21 @@ class HDF5DatasetTest(data.Dataset):
 
             var_arr_list.append(x)
 
+        jets_var_arr_list = []
+        for var in jets_variables:
+            x = jets[var]
+            shift = np.float32(scale_dict_jets[var]["shift"])
+            scale = np.float32(scale_dict_jets[var]["scale"])
+            x -= shift
+            x /= scale
+            jets_var_arr_list.append(x)
+
         x = np.stack(var_arr_list, axis=-1)
-        y = hf["jets"]["HadronConeExclTruthLabelID"][: int(1e6)]
+        x_jets = np.stack(jets_var_arr_list, axis=1)[:, None, :]
+
+        x_jets = np.repeat(x_jets, repeats=x.shape[1], axis=1)
+        x = np.concatenate((x, x_jets), axis=-1)
+        y = hf["jets"]["HadronConeExclTruthLabelID"][:num_samples]
 
         indices_toremove = []
         for class_id in classes_to_remove:

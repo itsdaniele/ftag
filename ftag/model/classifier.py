@@ -11,9 +11,16 @@ from torchmetrics import MaxMetric
 
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+
+import h5py
 
 
 class Classifier(pl.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.predictions = []
+
     def step(self, batch):
         raise NotImplementedError()
 
@@ -65,6 +72,20 @@ class Classifier(pl.LightningModule):
         )
 
         return {"preds": preds, "targets": targets}
+
+    def on_test_end(self):
+        preds = np.stack(self.predictions, axis=0)
+        print(preds.shape)
+        h5f = h5py.File('preds.h5', 'w')
+        h5f.create_dataset('preds', data=preds)
+        h5f.close()
+
+
+
+    def test_epoch_end(self, outputs):
+
+        for elem in outputs:
+            self.predictions.append(elem["preds"].cpu().numpy())
 
     def validation_epoch_end(self, outputs):
         acc = self.val_acc.compute()  # get val accuracy from current epoch
@@ -133,15 +154,15 @@ class ClassifierHugging(Classifier):
 
 
 class ClassifierCustom(Classifier):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, hidden_size=32, depth=6):
+        super(ClassifierCustom, self).__init__()
 
-        self.bert = BERT(hidden=8, n_layers=3, attn_heads=4, dropout=0.1)
-        self.to_logits = nn.Linear(8, 3)
+        self.bert = BERT(hidden=hidden_size, n_layers=depth, attn_heads=8, dropout=0.1)
+        self.to_logits = nn.Linear(hidden_size, 3)
 
         # 21 = track variables, 2=jet pt and eta
         # TODO do better
-        self.embed = torch.nn.Linear(21 + 2, 8)
+        self.embed = torch.nn.Linear(21 + 2, hidden_size)
 
         self.train_acc = Accuracy()
         self.val_acc = Accuracy()

@@ -15,7 +15,7 @@ import torch
 from torch.utils.data import DataLoader
 
 
-from ftag.model.classifier import Classifier
+from ftag.model.classifier import ClassifierCustom
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +44,10 @@ def main(cfg: DictConfig) -> None:
     test_loader = DataLoader(dataset, batch_size=None, num_workers=32)
 
     # Instantiate all modules specified in the configs
-    model = Classifier().load_from_checkpoint(
+    model = ClassifierCustom.load_from_checkpoint(
         checkpoint_path=os.path.join(
             get_original_cwd(),
-            "outputs/2022-02-24/full_run/ftag/27pylqzl/checkpoints/epoch=99-step=399999.ckpt",
+            "outputs/2022-04-19/21-57-10/ftag/2ond1jhd/checkpoints/epoch=59-step=1431009.ckpt",
         )
     )
 
