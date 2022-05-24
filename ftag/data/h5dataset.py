@@ -87,7 +87,7 @@ def get_track_mask(tracks: np.ndarray) -> np.ndarray:
 
 
 class HDF5DatasetTest(data.Dataset):
-    def __init__(self, file_path, scale_dict_path, batch_size=32, num_samples=int(1e3)):
+    def __init__(self, file_path, scale_dict_path, batch_size=32, num_samples=int(1e5)):
         super().__init__()
 
         classes_to_remove = [15]

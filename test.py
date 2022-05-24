@@ -37,7 +37,7 @@ def main(cfg: DictConfig) -> None:
     logger.info("\n" + OmegaConf.to_yaml(cfg))
 
     dataset = HDF5DatasetTest(
-        file_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/hybrids/MC16d-inclusive_testing_zprime_PFlow.h5",
+        file_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/hybrids/MC16d-inclusive_testing_ttbar_PFlow.h5",
         scale_dict_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/PFlow-scale_dict.json",
     )
 

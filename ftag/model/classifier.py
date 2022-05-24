@@ -20,6 +20,7 @@ class Classifier(pl.LightningModule):
     def __init__(self):
         super().__init__()
         self.predictions = []
+        self.targets = []
 
     def step(self, batch):
         raise NotImplementedError()
@@ -60,6 +61,8 @@ class Classifier(pl.LightningModule):
 
     def test_step(self, batch, batch_idx: int):
         _, preds, targets = self.step(batch)
+        logits = self.forward(batch)
+        probs = nn.Softmax(dim=-1)(logits)
 
         # log val metrics
         _ = self.test_acc(preds, targets)
@@ -71,21 +74,20 @@ class Classifier(pl.LightningModule):
             prog_bar=True,
         )
 
-        return {"preds": preds, "targets": targets}
+        return {"preds": preds, "targets": targets, "probs": probs}
 
     def on_test_end(self):
-        preds = np.stack(self.predictions, axis=0)
-        print(preds.shape)
-        h5f = h5py.File('preds.h5', 'w')
-        h5f.create_dataset('preds', data=preds)
+        preds = np.concatenate(self.predictions, axis=0)
+        targets = np.concatenate(self.targets, axis=0)
+        h5f = h5py.File("probs.h5", "w")
+        h5f.create_dataset("probs", data=preds)
+        h5f.create_dataset("targets", data=targets)
         h5f.close()
 
-
-
     def test_epoch_end(self, outputs):
-
         for elem in outputs:
-            self.predictions.append(elem["preds"].cpu().numpy())
+            self.predictions.append(elem["probs"].cpu().numpy())
+            self.targets.append(elem["targets"].cpu().numpy())
 
     def validation_epoch_end(self, outputs):
         acc = self.val_acc.compute()  # get val accuracy from current epoch
