@@ -38,7 +38,7 @@ def main(cfg: DictConfig) -> None:
 
     dm = hydra.utils.instantiate(cfg.data)
     dm.setup()
-    val_loader = dm.val_dataloader()
+    val_loader = dm.train_dataloader()
 
     dataset = HDF5DatasetTest(
         file_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/hybrids/MC16d-inclusive_testing_ttbar_PFlow.h5",

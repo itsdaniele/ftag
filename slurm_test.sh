@@ -1,13 +1,13 @@
 #!/bin/sh
-#
-# <https://doc.eresearch.unige.ch/hpc/slurm#gpgpu_jobs>
 
-#SBATCH --partition=shared-gpu
+#SBATCH --partition=private-mlg-gpu
+#SBATCH --reservation=private_mlg_4626
 #SBATCH --output=slurm.out
 #SBATCH --error=slurm.err
-#SBATCH --time=00:02:00
+#SBATCH --time=00:20:00
 #SBATCH --gpus=1
-
+#SBATCH --cpus-per-task 16
+#SBATCH --mem=24000
 echo "I: full hostname: $(hostname -f)"
 
 module load GCC/9.3.0

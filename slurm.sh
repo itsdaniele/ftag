@@ -6,10 +6,11 @@
 #SBATCH --output=slurm.out
 #SBATCH --error=slurm.err
 #SBATCH --time=12:00:00
-#SBATCH --gres=gpu:ampere:1
+#SBATCH --gpus=ampere:1
 #SBATCH --cpus-per-task 32
 #SBATCH --nodes=1
 #SBATCH --mem=24000
+#SBATCH --signal=SIGUSR1@90
 echo "I: full hostname: $(hostname -f)"
 
 module load GCC/9.3.0
