@@ -36,6 +36,10 @@ def main(cfg: DictConfig) -> None:
 
     logger.info("\n" + OmegaConf.to_yaml(cfg))
 
+    dm = hydra.utils.instantiate(cfg.data)
+    dm.setup()
+    val_loader = dm.val_dataloader()
+
     dataset = HDF5DatasetTest(
         file_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/hybrids/MC16d-inclusive_testing_ttbar_PFlow.h5",
         scale_dict_path="/srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/PFlow-scale_dict.json",
@@ -47,7 +51,7 @@ def main(cfg: DictConfig) -> None:
     model = ClassifierCustom.load_from_checkpoint(
         checkpoint_path=os.path.join(
             get_original_cwd(),
-            "outputs/2022-04-19/21-57-10/ftag/2ond1jhd/checkpoints/epoch=59-step=1431009.ckpt",
+            "outputs/2022-04-19/full_run/ftag/2ond1jhd/checkpoints/epoch=59-step=1431009.ckpt",
         )
     )
 
@@ -57,7 +61,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     # ßtrainer.fit(model, datamodule=data_module)
-    trainer.test(model, dataloaders=[test_loader])
+    trainer.test(model, dataloaders=[val_loader])
 
 
 if __name__ == "__main__":

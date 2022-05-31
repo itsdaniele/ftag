@@ -1,14 +1,11 @@
-name: cifar10
-
+name: ftag
 _target_: ftag.data.TRACKSDataModule
 # Use absolute path for input to avoid messing with hydra output paths
 data_dir: /srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/preprocessed/PFlow-hybrid-resampled_scaled_shuffled.h5
 batch_size: 64
 num_workers: 16
 
-
 test:
-
   _target_: ftag.data.TRACKSDataModule
   # Use absolute path for input to avoid messing with hydra output paths
   data_dir: /srv/beegfs/scratch/groups/dpnc/atlas/FTag/samples/gnn-samples/v9/hybrids/MC16d-inclusive_testing_ttbar_PFlow.h5

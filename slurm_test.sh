@@ -5,11 +5,9 @@
 #SBATCH --partition=shared-gpu
 #SBATCH --output=slurm.out
 #SBATCH --error=slurm.err
-#SBATCH --time=01:00:00
-#SBATCH --gres=gpu:ampere:1
-#SBATCH --cpus-per-task 32
-#SBATCH --nodes=1
-#SBATCH --mem=24000
+#SBATCH --time=00:02:00
+#SBATCH --gpus=1
+
 echo "I: full hostname: $(hostname -f)"
 
 module load GCC/9.3.0

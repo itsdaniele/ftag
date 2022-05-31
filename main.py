@@ -11,7 +11,7 @@ from pytorch_lightning import (
     Trainer,
 )
 
-from ftag.model.classifier import ClassifierHugging, ClassifierCustom
+from ftag.model.classifier import ClassifierCustom
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     trainer.fit(model, datamodule=data_module)
-    #trainer.test(model, datamodule=data_module)
+    # trainer.test(model, datamodule=data_module)
 
 
 if __name__ == "__main__":
